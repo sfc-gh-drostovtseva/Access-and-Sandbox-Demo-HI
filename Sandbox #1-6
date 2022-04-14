@@ -1,0 +1,159 @@
+// SANDBOX #1
+// If the analyst is allowed to create a new sandbox environment at will, demonstrate how the analyst would create and access. 
+// If not, then demonstrate how the analyst would access the sandbox environment previously created by an admin.
+
+use role accountadmin;
+
+-- create analyst role 
+create role if not exists analyst comment = "MQD Analyst";
+grant role analyst to user drostovtseva_sfc; //use your user name//
+
+-- grant read access to production data to the analyst role
+grant usage on database "HTS_EDW_DIM" to role analyst;
+grant usage on schema "HTS_EDW_DIM"."PUBLIC" to role analyst;
+grant select on all tables in schema "HTS_EDW_DIM"."PUBLIC" to role analyst;
+grant select on future tables in schema  "HTS_EDW_DIM"."PUBLIC" to role analyst;
+grant usage on warehouse compute_wh to role analyst;
+grant execute task on account to role analyst;
+
+-- grant the analyst an ability to create new databases
+grant create database on account to role analyst;
+
+--switch to analyst role
+use role analyst;
+use warehouse compute_wh;
+
+--Below, choose option 1 or 2:
+
+--Option 1 - analyst creates a sandbox environment by zero-copy cloning a prod db - fast and efficient way to spin up sandbox environments
+--THIS IS THE PREFERRED METHOD
+create or replace database sandbox clone "HTS_EDW_DIM"; --clone the entire dim database without actually duplicating the data
+
+--Option 2 - analyst simply creates a blank database
+create or replace database sandbox;
+
+// SANDBOX #2
+// Demonstrate and explain the process by which the analyst can move a csv file (a cohort of members with stroke, for specificity) 
+// from the analyst's PC into a new database table in the analyst's sandbox environment.
+
+--create a Stroke schema and a table to hold the stroke cohort data
+use database sandbox;
+create schema stroke;
+create table stroke_cohort
+(DIM_MEM_INFO_KEY int);
+
+--create a file format to load CSV - can demonstrate from the GUI instead
+create or replace file format my_csv_format type='CSV' field_delimiter = ',' record_delimiter = '\n' skip_header = 1 ;
+
+--upload data
+//upload stroke_cohort.csv from GUI
+
+--confirm that the data was loaded successfully
+select * from "SANDBOX"."STROKE"."STROKE_COHORT";
+
+// SANDBOX #3
+// Demonstrate how the analyst can create a stored procedure which joins the member cohort table in the sandbox 
+// with a production database table (encounters table filtered for the previous month, for specificity) 
+// and outputs the results into another table in the analyst's sandbox (encounters of stroke patients in month M, for specificity).
+
+create table sandbox.stroke.stroke_encounters
+(DIM_MEM_INFO_KEY int, FCT_CLM_RX_KEY int);
+
+create or replace procedure sandbox.stroke.stroke_cohort_stp (yyyymm string)
+returns string
+language SQL
+execute as owner
+as
+$$
+    begin   
+    
+      insert overwrite into sandbox.stroke.stroke_encounters
+      select a.DIM_MEM_INFO_KEY, b.FCT_CLM_RX_KEY 
+      from "SANDBOX"."STROKE"."STROKE_COHORT" as a 
+            inner join "HTS_EDW_DIM"."PUBLIC"."FCT_CLM_RX"as b
+            on a.DIM_MEM_INFO_KEY = b.DIM_MEM_INFO_KEY 
+      where substr(dim_pd_dt_key,1,6)=:yyyymm;
+      return 'Success';
+   
+      exception
+      when statement_error or expression_error then 
+      return 'Failed';
+
+    end
+$$
+;
+
+--test procedure
+call sandbox.stroke.stroke_cohort_stp('201601');
+select count(*) from "SANDBOX"."STROKE"."STROKE_ENCOUNTERS";
+
+
+// SANDBOX #4
+//Demonstrate how the analyst can save the stored procedure to the code repository.
+
+--list procedures
+show procedures;
+--display procedure DDL
+select get_ddl('procedure','STROKE_COHORT_STP(string)');
+
+--{add saving to BitBucket}
+
+// SANDBOX #5
+//Demonstrate how the analyst can schedule this stored procedure to run on a schedule (e.g. first business day of each month).
+
+--schedule task to run on the 1st of the month and retrieve data for the previous month
+create task stroke_cohort_task
+warehouse = compute_wh
+schedule ='USING CRON 0 0 1 * * UTC'
+as call stroke_cohort_stp(translate(substr(to_varchar(add_months(current_date(),-1)),1,7),'-',''));
+
+--confirm that the task exists
+show tasks;
+
+--manually trigger task
+execute task stroke_cohort_task;
+
+--review task execution history 
+select *
+  from table(information_schema.task_history())
+  order by scheduled_time;
+
+--resume/suspend task
+alter task stroke_cohort_task resume;
+alter task stroke_cohort_task suspend;
+
+// SANDBOX #6
+// Demonstrate and explain how the analyst can give or restrict access to tables 
+// and stored procedures in the analyst's sandbox to other analysts.
+
+--admin creates a new role junior_analyst
+use role accountadmin;
+create role if not exists junior_analyst;
+grant usage on warehouse compute_wh to role junior_analyst;
+
+--assign the new junior_analyst role to a user for testing
+grant role junior_analyst to user drostovtseva_sfc;
+
+--test junior_analyst role
+use role junior_analyst;
+
+--switch to analyst role;
+use role analyst;
+
+--analyst grants read-only access to the sandbox to junior analyst
+grant usage on database sandbox to role junior_analyst;
+grant usage on schema sandbox.stroke to role junior_analyst;
+grant select on all tables in database sandbox to role junior_analyst;
+grant usage on procedure sandbox.stroke.stroke_cohort_stp(string) to role junior_analyst;
+
+--test access for junior_analyst role
+use role junior_analyst;
+use warehouse compute_wh;
+
+call sandbox.stroke.stroke_cohort_stp('201601');
+select count(*) from "SANDBOX"."STROKE"."STROKE_ENCOUNTERS";
+
+
+//Clean-up 
+use role accountadmin;
+drop database if exists sandbox;
