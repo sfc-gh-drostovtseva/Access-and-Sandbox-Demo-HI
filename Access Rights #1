@@ -1,0 +1,46 @@
+// ACCESS RIGHTS #1
+// A new project with 10 team members is created, and the members need to be granted read access 
+// to the database tables from data submitters S1 and S2, except for PII and PHI data. 
+// Demonstrate how PII and PHI attributes are associated with certain data.
+
+
+--Snowflake enables you to automatically identify and tag sensitive fields. In this scrip we walk through the key capabilities
+use role sysadmin;
+
+--review the fields we would like to associate with PHI/PII
+select * from "HTS_EDW_DIM"."PUBLIC"."DIM_MEM" limit 100;
+
+--run extract categories function to classify fields by their semantic and privacy category
+--we will save off the results to out auditing database
+create or replace table auditing.public.semantic_categories(v variant) as 
+select extract_semantic_categories('"HTS_EDW_DIM"."PUBLIC"."DIM_MEM"');
+
+--review the classification results
+select 
+key as column_name, 
+value:semantic_category as semantic_category, 
+value:privacy_category as privacy_category,
+value:extra_info:probability as probability
+from auditing.public.semantic_categories, lateral flatten(input=>v);
+where value:semantic_category<>'NULL';
+
+--update classifications as appropriate
+update auditing.public.semantic_categories
+set v = object_insert(v,'MEM_ID',object_insert(object_insert(v:MEM_TITLE,'semantic_category','ID',true),'privacy_category','IDENTIFIER',true),true);
+update auditing.public.semantic_categories
+set v = object_insert(v,'MEM_TITLE',object_insert(object_insert(v:MEM_TITLE,'semantic_category','NAME',true),'privacy_category','IDENTIFIER',true),true);
+update auditing.public.semantic_categories
+set v = object_insert(v,'MEM_RACE_DSC',object_insert(object_insert(v:MEM_TITLE,'semantic_category',NULL,true),'privacy_category',NULL,true),true);
+
+
+--create tags based on semantic categories
+call associate_semantic_category_tags('"HTS_EDW_DIM"."PUBLIC"."DIM_MEM"',(select * from auditing.public.semantic_categories));
+
+--review data by tags
+select tag_name, tag_value, column_name, object_name
+from table(HTS_EDW_DIM.information_schema.tag_references('DIM_MEM.MEM_ID','COLUMN'));
+
+select tag_name, tag_value, column_name
+from snowflake.account_usage.tag_references
+where object_name='DIM_MEM'
+order by column_name, tag_name;
