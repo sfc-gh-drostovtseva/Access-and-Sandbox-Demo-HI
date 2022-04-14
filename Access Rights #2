@@ -1,0 +1,32 @@
+// ACCESS RIGHTS #2
+// A manager requests a document which shows what information each employee in his/her group has access to. 
+// The document format should be suitable for analytics (e.g., pivoting, grouping, filtering, etc.), such as a spreadsheet. 
+// Demonstrate how this document is created and accessed.
+
+use role sysadmin;
+
+--create a separate database to store a view for the auditing report
+create or replace database auditing;
+use database auditing;
+use schema public;
+use warehouse compute_wh;
+
+create or replace view user_access_vw as
+select distinct
+a.grantee_name,
+b.table_catalog as database_name,
+b.table_schema as schema_name,
+case when granted_on='TABLE' then name end as table_name
+from "SNOWFLAKE"."ACCOUNT_USAGE"."GRANTS_TO_USERS" as a inner join "SNOWFLAKE"."ACCOUNT_USAGE"."GRANTS_TO_ROLES" as b on a.role=b.grantee_name
+where a.deleted_on is null --role assignment is current
+and b.deleted_on is null -- grant has not been revoked
+and b.granted_on in ('TABLE')
+and b.privilege in ('OWNERSHIP','SELECT')
+order by 1,2,3,4
+;
+
+select * from user_access_vw; -- in your data visualization tool, connect to this view
+
+--clean up
+//drop database auditing;
+
