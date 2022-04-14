@@ -1,3 +1,4 @@
+
 // SANDBOX #1
 // If the analyst is allowed to create a new sandbox environment at will, demonstrate how the analyst would create and access. 
 // If not, then demonstrate how the analyst would access the sandbox environment previously created by an admin.
@@ -26,10 +27,11 @@ use warehouse compute_wh;
 --Below, choose option 1 or 2:
 
 --Option 1 - analyst creates a sandbox environment by zero-copy cloning a prod db - fast and efficient way to spin up sandbox environments
---THIS IS THE PREFERRED METHOD
+--THIS IS THE PREFERRED METHOD PARTICULARLY IF YOU ARE DOING DEVELOPMENT ON DATA THAT IS SIMILAR TO PRODUCTION
 create or replace database sandbox clone "HTS_EDW_DIM"; --clone the entire dim database without actually duplicating the data
 
 --Option 2 - analyst simply creates a blank database
+--THIS IS A GOOD OPTION IF YOU JUST NEED A BLANK SANDBOX
 create or replace database sandbox;
 
 // SANDBOX #2
@@ -155,5 +157,7 @@ select count(*) from "SANDBOX"."STROKE"."STROKE_ENCOUNTERS";
 
 
 //Clean-up 
-use role accountadmin;
+use role analyst;
 drop database if exists sandbox;
+use role accountadmin;
+
