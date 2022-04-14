@@ -11,7 +11,7 @@ select * from "HTS_EDW_DIM"."PUBLIC"."DIM_MEM" limit 100;
 
 --run extract categories function to automatically classify fields by their semantic and privacy categories
 --we will save off the results to out auditing database
-create or replace table auditing.public.semantic_categories(v variant) as 
+create table auditing.public.semantic_categories(v variant) if not exists as 
 select extract_semantic_categories('"HTS_EDW_DIM"."PUBLIC"."DIM_MEM"');
 
 --review the classification results
