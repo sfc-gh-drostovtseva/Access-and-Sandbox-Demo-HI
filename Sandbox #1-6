@@ -94,8 +94,9 @@ select count(*) from "SANDBOX"."STROKE"."STROKE_ENCOUNTERS";
 //Demonstrate how the analyst can save the stored procedure to the code repository.
 
 --list procedures
-show procedures;
+show procedures in database sandbox;
 --display procedure DDL
+use schema sandbox.stroke;
 select get_ddl('procedure','STROKE_COHORT_STP(string)');
 
 --{add saving to BitBucket}
@@ -134,7 +135,7 @@ create role if not exists junior_analyst;
 grant usage on warehouse compute_wh to role junior_analyst;
 
 --assign the new junior_analyst role to a user for testing
-grant role junior_analyst to user drostovtseva_sfc;
+grant role junior_analyst to user drostovtseva_sfc; //use your name//
 
 --test junior_analyst role
 use role junior_analyst;
@@ -160,4 +161,3 @@ select count(*) from "SANDBOX"."STROKE"."STROKE_ENCOUNTERS";
 use role analyst;
 drop database if exists sandbox;
 use role accountadmin;
-
