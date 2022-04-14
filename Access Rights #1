@@ -3,14 +3,13 @@
 // to the database tables from data submitters S1 and S2, except for PII and PHI data. 
 // Demonstrate how PII and PHI attributes are associated with certain data.
 
-
---Snowflake enables you to automatically identify and tag sensitive fields. In this scrip we walk through the key capabilities
+--Snowflake enables you to automatically identify and tag sensitive fields. In this script we walk through the key capabilities
 use role sysadmin;
 
 --review the fields we would like to associate with PHI/PII
 select * from "HTS_EDW_DIM"."PUBLIC"."DIM_MEM" limit 100;
 
---run extract categories function to classify fields by their semantic and privacy category
+--run extract categories function to automatically classify fields by their semantic and privacy categories
 --we will save off the results to out auditing database
 create or replace table auditing.public.semantic_categories(v variant) as 
 select extract_semantic_categories('"HTS_EDW_DIM"."PUBLIC"."DIM_MEM"');
@@ -21,7 +20,7 @@ key as column_name,
 value:semantic_category as semantic_category, 
 value:privacy_category as privacy_category,
 value:extra_info:probability as probability
-from auditing.public.semantic_categories, lateral flatten(input=>v);
+from auditing.public.semantic_categories, lateral flatten(input=>v)
 where value:semantic_category<>'NULL';
 
 --update classifications as appropriate
@@ -34,9 +33,11 @@ set v = object_insert(v,'MEM_RACE_DSC',object_insert(object_insert(v:MEM_TITLE,'
 
 
 --create tags based on semantic categories
+--tags enable you to easily track sensitive data for compliance and utilization
+--associate_semantic_category_tags is a built-in stored procedure that applies the tags
 call associate_semantic_category_tags('"HTS_EDW_DIM"."PUBLIC"."DIM_MEM"',(select * from auditing.public.semantic_categories));
 
---review data by tags
+--review applied tags
 select tag_name, tag_value, column_name, object_name
 from table(HTS_EDW_DIM.information_schema.tag_references('DIM_MEM.MEM_ID','COLUMN'));
 
@@ -44,3 +45,49 @@ select tag_name, tag_value, column_name
 from snowflake.account_usage.tag_references
 where object_name='DIM_MEM'
 order by column_name, tag_name;
+
+--Data classification has a greater impact on governance when you can use it to protect the data
+--In this segment we will create a non-pii user role and demonstrate how sensitive fields can be masked from non-PII user access
+
+use role accountadmin;
+create role if not exists non_pii_user;
+grant role non_pii_user to user drostovtseva_sfc;
+
+grant usage on database "HTS_EDW_DIM" to role non_pii_user;
+grant usage on schema "HTS_EDW_DIM"."PUBLIC" to role non_pii_user;
+grant select on all tables in database "HTS_EDW_DIM" to role non_pii_user;
+grant select on future tables in database "HTS_EDW_DIM" to role non_pii_user;
+grant usage on warehouse compute_wh to role non_pii_user;
+
+create masking policy if not exists auditing.public.mask_string_simple as
+  (val string) returns string ->
+  case
+    when current_role() in ('NON_PII_USER') then '**masked**'
+    else val
+    end;
+    
+create masking policy if not exists auditing.public.mask_int_simple as
+  (val integer) returns integer ->
+  case
+    when current_role() in ('NON_PII_USER') then -999999
+    else val
+    end;
+
+show masking policies in database auditing;
+
+alter table "HTS_EDW_DIM"."PUBLIC"."DIM_MEM" modify
+column MEM_FRST_NM set masking policy auditing.public.mask_string_simple,
+column MEM_LST_NM  set masking policy auditing.public.mask_string_simple,
+column MEM_MID_NM set masking policy auditing.public.mask_string_simple,
+column MEM_SSN set masking policy auditing.public.mask_string_simple,
+column MEM_ID set masking policy auditing.public.mask_string_simple,
+column DIM_MEM_DOB set masking policy auditing.public.mask_int_simple,
+column DIM_MEM_DOD set masking policy auditing.public.mask_int_simple;
+
+--test masking policies
+use role non_pii_user;
+use warehouse compute_wh;
+
+select mem_id, mem_frst_nm, mem_lst_nm,mem_mid_nm, mem_ssn, mem_gender_dsc, mem_race_cd, mem_ethn_cd, mem_lang_cd, dim_mem_dob
+from "HTS_EDW_DIM"."PUBLIC"."DIM_MEM";
+
